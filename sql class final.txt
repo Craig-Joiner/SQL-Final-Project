@@ -1,0 +1,105 @@
+DROP TABLE IF EXISTS detailed;
+CREATE TABLE detailed (
+    rental_id INT,
+    film_id INT,
+    category_id INT,
+    rental_date TIMESTAMP,
+    return_date TIMESTAMP,
+    amount NUMERIC (5,2)
+);
+
+DROP TABLE IF EXISTS summary;
+CREATE TABLE summary(
+  name VARCHAR(11),
+    rental_count INT,
+    total_revenue NUMERIC DEFAULT 0
+);
+
+INSERT INTO detailed (
+    rental_id,
+    film_id,
+    category_id,
+    rental_date,
+    return_date,
+    amount
+)
+SELECT
+    r.rental_id,
+    i.film_id,
+    c.category_id,
+    r.rental_date,
+    r.return_date,
+    p.amount
+FROM
+    rental r
+JOIN inventory i ON r.inventory_id = i.inventory_id
+JOIN film_category fc ON i.film_id = fc.film_id
+JOIN category c ON fc.category_id = c.category_id
+JOIN payment p ON r.rental_id = p.rental_id;
+
+CREATE FUNCTION update_summary()
+  RETURNS TRIGGER 
+  LANGUAGE plpgsql
+AS $$
+BEGIN
+  
+  INSERT INTO summary (name, rental_count, total_revenue)
+  SELECT
+    c.name,
+    COUNT(*) AS rental_count,
+    COALESCE(SUM(d.amount), 0) AS total_revenue
+  FROM
+    detailed d
+    JOIN film_category fc ON d.category_id = fc.category_id
+    JOIN category c ON fc.category_id = c.category_id
+
+  GROUP BY
+    c.name
+  ORDER BY 
+    rental_count DESC;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER update_summary_trigger
+AFTER INSERT OR DELETE ON detailed
+FOR EACH STATEMENT
+EXECUTE PROCEDURE update_summary();
+
+
+DROP PROCEDURE IF EXISTS update_procedure();
+CREATE OR REPLACE PROCEDURE update_procedure()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+
+  DELETE FROM detailed;
+  DELETE FROM summary;
+
+  INSERT INTO detailed (
+    rental_id,
+    film_id,
+    category_id,
+    rental_date,
+    return_date,
+    amount
+  )
+  SELECT
+    r.rental_id,
+    i.film_id,
+    c.category_id,
+    r.rental_date,
+    r.return_date,
+    p.amount
+  FROM
+    rental r
+    JOIN inventory i ON r.inventory_id = i.inventory_id
+    JOIN film_category fc ON i.film_id = fc.film_id
+    JOIN category c ON fc.category_id = c.category_id
+    JOIN payment p ON r.rental_id = p.rental_id;
+END;
+$$;
+
+-- To call the stored procedure once a week or as needed--
+CALL update_procedure();
